@@ -1,0 +1,56 @@
+[gd_scene load_steps=3 format=3 uid="uid://b45sll5dvit4y"]
+
+[ext_resource type="Script" path="res://addons/frog_console/DevConsole.gd" id="1_mjhgo"]
+
+[sub_resource type="CodeHighlighter" id="CodeHighlighter_2gy6w"]
+number_color = Color(0.69, 0.76, 0.87, 1)
+symbol_color = Color(0.98, 0.5, 0.44, 1)
+function_color = Color(0.25, 0.41, 0.88, 1)
+member_variable_color = Color(0.18, 0.54, 0.34, 1)
+
+[node name="DevConsole" type="VBoxContainer" groups=["DevConsole"]]
+custom_minimum_size = Vector2(1000, 500)
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mjhgo")
+
+[node name="ConsoleName" type="Label" parent="."]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Dev Console"
+horizontal_alignment = 1
+
+[node name="VSplit" type="VSplitContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Log" type="RichTextLabel" parent="VSplit"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 85)
+layout_mode = 2
+focus_mode = 2
+bbcode_enabled = true
+text = "Type help for a list of default commands, and help2 for all other commands.
+To execute code, call execute or create two new lines."
+scroll_following = true
+selection_enabled = true
+
+[node name="CodeEdit" type="CodeEdit" parent="VSplit"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+theme_override_colors/background_color = Color(0.0980392, 0.0980392, 0.0980392, 0.788235)
+minimap_draw = true
+minimap_width = 100
+syntax_highlighter = SubResource("CodeHighlighter_2gy6w")
+highlight_current_line = true
+draw_tabs = true
+gutters_draw_line_numbers = true
+code_completion_enabled = true
+auto_brace_completion_enabled = true
+
+[connection signal="code_completion_requested" from="VSplit/CodeEdit" to="." method="_on_code_edit_code_completion_requested"]
+[connection signal="text_changed" from="VSplit/CodeEdit" to="." method="_on_code_edit_text_changed"]
