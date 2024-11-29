@@ -20,7 +20,9 @@ var default_functions : Dictionary = {
 	"if" : "Runs following code if args is true.",
 	"endif" : "Ends an if statement",
 	"break" : "Breaks out of current loop",
-	"concat" : "Add strings to a string. Use like concat var1 hello world"
+	"concat" : "Add strings to a string. Use like concat var1 hello world",
+	"spork" : "Creates a spork.",
+	"join" : "Joins sporks"
 }
 #Use # to comment
 #"eval"
@@ -34,7 +36,12 @@ var ended_commands : PackedStringArray = PackedStringArray(["for","times","loop_
 var previous_num_lines : int = 1
 #Used as a delimiter for splitting purposes.
 var delimiter : String = "¬"
+var delimiter_thread : String = "§"
 var variables : Array = []
+var threads_active : int = 1
+var threaded_variables : Array = []
+var thread2 : Thread
+var thread2_origin : int = 0 #Used to resolve some thread wierdness.
 #Stores dictionaries depending on the scope.
 
 # Called when the node enters the scene tree for the first time.
@@ -48,10 +55,13 @@ func _ready():
 	function_names = function_dictionary.keys()
 	editor.code_completion_prefixes = function_names
 	for word in default_functions:
-		if word != "var":
-			editor.syntax_highlighter.add_keyword_color(word, Color.ORCHID)
-		else:
+		if word == "var":
 			editor.syntax_highlighter.add_keyword_color(word, Color.DARK_ORANGE)
+		elif word in ["spork", "join"]:
+			editor.syntax_highlighter.add_keyword_color(word, Color.DEEP_PINK)
+		else:
+			editor.syntax_highlighter.add_keyword_color(word, Color.ORCHID)
+			
 	for word in custom_functions:
 		if word != "cheat":
 			editor.syntax_highlighter.add_keyword_color(word, Color.DEEP_SKY_BLUE)
@@ -61,6 +71,8 @@ func _ready():
 		editor.syntax_highlighter.add_keyword_color(word, Color.INDIAN_RED)
 	for word in ["array", "arr"]:
 		editor.syntax_highlighter.add_keyword_color(word, Color.SPRING_GREEN)
+	for word in ["sid"]:
+		editor.syntax_highlighter.add_keyword_color(word, Color.HOT_PINK)
 	editor.syntax_highlighter.add_keyword_color("eval", Color.LAWN_GREEN)
 
 func _on_code_edit_code_completion_requested():
@@ -92,20 +104,23 @@ func _on_code_edit_new_final_line():
 				enter_scope()
 				execute()
 				clear_editor()
+				threads_active = 1
 				return
 			"execute_keep":
 				variables = []
 				enter_scope()
 				execute()
+				threads_active = 1
 				return
 	if editor.get_line_count() >= 3 && remove_white_spaces(editor.get_line(editor.get_line_count()-3)) == "":
 		variables = []
 		enter_scope()
 		execute()
 		clear_editor()
+		threads_active = 1
 		return
 
-func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
+func execute(pointer_start : int = 0, pointer_end : int = -1, thread_id : int = 0) -> bool:
 	if pointer_start == 0 && clog.text != "":
 		print_to_log("\n")
 	if pointer_end == -1:
@@ -117,6 +132,7 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 		var l : String = editor.get_line(pointer)
 		#Line at pointer
 		var ls : PackedStringArray = split_white_space(l)
+		ls = replace_threaded_var_identifier(ls, thread_id)
 		var lsp = replace_vars_with_values(ls)
 		ls = lsp[0]
 		#for i in lsp[1]:
@@ -125,6 +141,8 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 		l = " ".join(ls)
 		ls = apply_evaluation(ls, l)
 		l = " ".join(ls)
+		#print(str(thread_id) + " ptr end : " + str(pointer_end) + str(ls))
+		#print("threads active " + str(threads_active))
 		#Array of the line split by white spaces at pointer
 		if !ls.is_empty():
 			var command_name : String = ls[0].to_lower()
@@ -146,14 +164,17 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 						if val > 0:
 							ending_ind = find_end_index(pointer, pointer_end)
 							for i in val:
-								enter_scope()
-								broken = execute(pointer + 1, ending_ind)
+								if threads_active < 2:
+									enter_scope()
+								broken = execute(pointer + 1, ending_ind, thread_id)
 								if broken:
 									break
 						if !broken:
-							enter_scope()
+							if threads_active < 2:
+								enter_scope()
 						else:
-							variables.resize(oldest_scope)
+							if threads_active < 2:
+								variables.resize(oldest_scope)
 							pointer = ending_ind
 				"loop_forever":
 					oldest_scope = variables.size()
@@ -161,7 +182,7 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 					var ending_ind : int = find_end_index(pointer, pointer_end)
 					while true:
 						enter_scope()
-						broken = execute(pointer + 1, ending_ind)
+						broken = execute(pointer + 1, ending_ind, thread_id)
 						if broken:
 							break
 					variables.resize(oldest_scope)
@@ -172,7 +193,8 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 						log_error("Argument for " + ls[0] + ": " + ls[1] + " is not a boolean")
 					else:
 						if val == "true" || val == "1":
-							enter_scope()
+							if threads_active < 2:
+								enter_scope()
 						else:
 							#Fast forward to the next end
 							var p2 : int = pointer + 1
@@ -193,11 +215,17 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 					pointer = pointer_end #find_end_index(last_loop_start, pointer_end)
 					return true
 				"end":
-					exit_scope()
-					if pointer_start != 0:
-						return false
+					if threads_active < 2:
+						exit_scope()
+					if thread_id == 0:
+						if pointer_start != 0:
+							return false
+					else:
+						if pointer_start != thread2_origin:
+							return false
 				"endif":
-					exit_scope()
+					if threads_active < 2:
+						exit_scope()
 				"echo":
 					echo(l)
 				"clear":
@@ -213,7 +241,27 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 				#"lo_hit":
 					#get_tree().quit()
 				"var":
-					create_var(ls, l)
+					create_var(ls, l, thread_id)
+				"spork":
+					if threads_active > 1:
+						log_error("More than 2 threads active. Cannot create new spork.")
+					else:
+						threaded_variables = []
+						threads_active += 1
+						enter_scope()
+						var ending_ind : int = find_join_index(pointer, pointer_end)
+						thread2 = Thread.new()
+						thread2.start(execute.bind(pointer + 1, ending_ind, thread_id + 1))
+						thread2_origin = pointer + 1
+						#print("SDJFKSDJHGJHKDSG " + str(ending_ind))
+				"join":
+					thread2.wait_to_finish()
+					print("Threads joined -----------------------------------------------")
+					exit_scope()
+					threads_active -= 1
+					threaded_variables = []
+					if thread_id != 0:
+						return false
 				"append":
 					append(ls)
 				"append_array":
@@ -348,7 +396,9 @@ func execute(pointer_start : int = 0, pointer_end : int = -1) -> bool:
 					else:
 						log_error("Command " + l + " not recognized")
 		pointer += 1
-	exit_scope()
+		#print(str(thread_id) + str(variables))
+	if threads_active < 2:
+		exit_scope()
 	return false
 
 func remove_at(ls : PackedStringArray):
@@ -414,26 +464,50 @@ func append_array(ls : PackedStringArray):
 				return
 	log_error("Identifier " + identifier_name + " not found")
 
-func create_var(ls : PackedStringArray, l : String):
+func create_var(ls : PackedStringArray, l : String, thread_id : int):
 	var already_defined : bool = false
 	var var_pointer : int = 0
-	if !check_if_valid_variable_name(ls[1]):
-		log_error("Variable name " + ls[1] + " is invalid because it shares the same name as a function or it isn't a string.")
+	var variable_name : String = ls[1]
+	if threads_active > 1 && variable_name[0] != delimiter_thread:
+		threaded_variables.push_back(variable_name)
+		variable_name = delimiter_thread + str(thread_id) + variable_name
+	if !check_if_valid_variable_name(variable_name):
+		log_error("Variable name " + variable_name + " is invalid because it shares the same name as a function or it isn't a string.")
 	else:
-		var arg = remove_by_keyword(remove_by_keyword(l, ls[1]), "=")
+		var arg = remove_by_keyword(remove_by_keyword(l, variable_name), "=")
 		var aarg = str_to_var(arg)
 		if aarg != null:
 			arg = aarg
+		for d in variables:
+			if d.has(variable_name):
+				already_defined = true
+				break
+			var_pointer += 1
+		if already_defined:
+			log_error("Variable " + variable_name + " is already defined. Overwriting the variable")
+			variables[var_pointer][variable_name] = arg
+		else:
+			variables.back()[variable_name] = arg
+
+
+func create_thread(ls : PackedStringArray, l : String):
+	var already_defined : bool = false
+	var var_pointer : int = 0
+	if !check_if_valid_variable_name(ls[1]):
+		log_error("Spork name " + ls[1] + " is invalid because it shares the same name as a function or it isn't a string.")
+	else:
 		for d in variables:
 			if d.has(ls[1]):
 				already_defined = true
 				break
 			var_pointer += 1
 		if already_defined:
-			log_error("Variable " + ls[1] + " is already defined. Overwriting the variable")
-			variables[var_pointer][ls[1]] = arg
+			log_error("Identifier " + ls[1] + " is already defined. Overwriting the Identifier")
+			variables[var_pointer][ls[1]] = Thread.new()
 		else:
-			variables.back()[ls[1]] = arg
+			variables.back()[ls[1]] = Thread.new()
+
+
 #Echo first removes the Echo prefix from the text.
 func echo(text : String) : 
 	var ind1 : int = text.findn("echo") + 5
@@ -441,7 +515,7 @@ func echo(text : String) :
 
 func log_error(text : String):
 	print_to_log("[color=red]"+text+"[/color]")
-	print("Console: Error occured")
+	print("Console error occured :" + text)
 
 func print_to_log(text : String):
 	clog.text = clog.text + "\n" + text
@@ -554,6 +628,20 @@ func replace_vars_with_values(ls : PackedStringArray) -> Array:
 	lsc.insert(0, first)
 	return [lsc, o]
 
+
+func replace_threaded_var_identifier(ls : PackedStringArray, thread_id : int) -> PackedStringArray:
+	if threads_active < 2 || ls.size() == 0:
+		return ls
+	var lsc : PackedStringArray = ls.duplicate()
+	for b in lsc.size():
+		var i = lsc[b]
+		if threaded_variables.has(i):
+			lsc[b] = delimiter_thread + str(thread_id) + lsc[b]
+		if i == "sid":
+			lsc[b] = str(thread_id)
+	return lsc
+
+
 func replace_arrs_with_values(ls : PackedStringArray) -> PackedStringArray:
 	var start_pointer : int = 1
 	if ls.size() == 0:
@@ -627,6 +715,19 @@ func find_end_index(pointer : int, pointer_end : int) -> int:
 				comm -= 1
 		p2 += 1
 	return p2-1
+
+func find_join_index(pointer : int, pointer_end : int) -> int:
+	var p2 : int = pointer + 1
+	while p2 < pointer_end:
+		var l2 : String = editor.get_line(p2)
+		#Line at pointer
+		var ls2 : PackedStringArray = split_white_space(l2)
+		if ls2.size() > 0:
+			var ls3 = ls2[0].to_lower()
+			if ls3 == "join":
+				return p2
+		p2 += 1
+	return p2
 
 func concatenate(ls : PackedStringArray):
 	if ls.size() < 3:
