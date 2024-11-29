@@ -2,8 +2,12 @@ extends Node
 
 #Put your custom functions here, where the key is the name of the function, and the value is the description.
 var custom_functions : Dictionary = {
-	"example_change_gravity" : "Example command that changes the gravity to arg[0]"
+	"example_change_gravity" : "Example command that changes the gravity to arg[0]",
+	"echo_time" : "Prints the time of the system.",
+	"stopwatch" : "Starts and stops a stopwatch, and prints its output."
 }
+
+var stopwatch_time : int = 0
 
 #Commands are defined as follows: Function name is command name, and it takes 2 arguments
 #ls - the parsed line, split by white space. This is a PackedStringArray.
@@ -19,6 +23,22 @@ func example_change_gravity(ls : PackedStringArray, _l : String):
 	
 	#Change the setting
 	ProjectSettings.set_setting("physics/2d/default_gravity", gravity_amount)
+
+#///////////////////////////////////////////////////////////////////////////
+func echo_time(_ls : PackedStringArray, _l : String):
+	print_to_console(Time.get_time_string_from_system())
+
+func stopwatch(_ls: PackedStringArray, _l : String):
+	if stopwatch_time == 0:
+		print_to_console("Stopwatch Started")
+		stopwatch_time = Time.get_ticks_usec()
+	else:
+		var difference_in_time : int = Time.get_ticks_usec() - stopwatch_time
+		var time_in_seconds : float = difference_in_time / 1000000.0
+		print_to_console("Stopwatch : " + str(time_in_seconds) + " seconds elapsed")
+		stopwatch_time = 0
+
+#///////////////////////////////////////////////////////////////////////////
 
 #Converts from string to bool. Assumes that the string is either true or false.
 func str_to_bool(text : String) -> bool:
